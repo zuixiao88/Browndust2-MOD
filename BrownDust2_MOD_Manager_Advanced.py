@@ -223,11 +223,47 @@ class Manager(tk.Tk):
         for k,b in self.nav.items():
             b.configure(bg="#30343d" if k==key else "#20232a",
                         fg="#ffffff" if k==key else "#c7cad1")
-        if key == "paths": self.start_search()
+        if key == "paths":
+            self.start_search()
+            self.status.set("路径查找：正在优先查找 Neowiz 及其下的 mod/mods 文件夹…")
         elif key == "settings":
-            messagebox.showinfo("设置","MOD 启用/禁用通过在所选项目名称末尾添加或移除 .disabled 实现。识别类别基于扩展名和目录类型；请先备份重要 MOD。")
-        elif key == "overview": self.status.set("总览：选择目录后会显示文件统计。")
-        else: self.status.set("MOD 列表：显示所选目录中的文件和子目录。")
+            self.open_settings()
+        elif key == "overview":
+            if self.root_dir and os.path.isdir(self.root_dir):
+                self.load_items()
+                self.status.set("总览已刷新：统计数据已更新。")
+            else:
+                self.metric["total"].set("0")
+                self.metric["files"].set("0")
+                self.metric["folders"].set("0")
+                self.metric["state"].set("待定位")
+                self.status.set("总览：请先点击“自动查找”或“选择目录”。")
+        elif key == "mods":
+            if self.root_dir and os.path.isdir(self.root_dir):
+                self.load_items()
+                self.status.set("MOD 列表已刷新。")
+            else:
+                self.status.set("MOD 列表：请先自动查找或手动选择 MOD 目录。")
+
+    def open_settings(self):
+        win = tk.Toplevel(self)
+        win.title("设置")
+        win.geometry("480x300")
+        win.configure(bg="#20232a")
+        win.transient(self)
+        tk.Label(win, text="管理器设置", bg="#20232a", fg="#ffffff",
+                 font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=22, pady=(20, 8))
+        tk.Label(win, text="选择 MOD 目录的方式，或查看启用/禁用规则。",
+                 bg="#20232a", fg="#c7cad1", font=("Segoe UI", 10)).pack(anchor="w", padx=22, pady=(0, 16))
+        tk.Button(win, text="自动查找 Neowiz / mod 文件夹",
+                  command=lambda: (win.destroy(), self.start_search()),
+                  bg="#a8793d", fg="#ffffff", relief="flat", padx=12, pady=8).pack(fill="x", padx=22, pady=5)
+        tk.Button(win, text="手动选择 MOD 目录",
+                  command=lambda: (win.destroy(), self.choose_dir()),
+                  bg="#2b2f38", fg="#e7e8eb", relief="flat", padx=12, pady=8).pack(fill="x", padx=22, pady=5)
+        tk.Label(win, text="启用/禁用会在项目名称末尾添加或移除 .disabled。\n此操作会重命名项目；操作前请备份重要 MOD。",
+                 bg="#20232a", fg="#9ca1ac", justify="left",
+                 font=("Segoe UI", 9)).pack(anchor="w", padx=22, pady=(12, 0))
 
     def start_search(self):
         if self.worker and self.worker.is_alive(): return
