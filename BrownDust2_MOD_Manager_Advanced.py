@@ -137,6 +137,8 @@ class Manager(tk.Tk):
         self.worker = None
         self.root_dir = ""
         self.items = []
+        self.preview_window = None
+        self.preview_image = None
         self.style_ui()
         self.build_ui()
         self.after(100, self.poll_events)
@@ -234,14 +236,15 @@ class Manager(tk.Tk):
         ent.pack(side="right", ipady=7, padx=(8,0))
         ent.bind("<KeyRelease>", lambda _e: self.render_items())
         self.label(lh, "过滤：", 9, "#9ca1ac").pack(side="right")
-        cols = ("name","type","size","path")
+        cols = ("name","type","size")
         self.tree = ttk.Treeview(listing, columns=cols, show="headings", selectmode="browse")
-        for col, title, width in [("name","文件名",260),("type","类型",90),
-                                  ("size","大小",100),("path","位置",360)]:
+        for col, title, width in [("name","文件名",460),("type","类型",150),
+                                  ("size","大小",120)]:
             self.tree.heading(col,text=title); self.tree.column(col,width=width,anchor="w")
         sb = ttk.Scrollbar(listing, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left",fill="both",expand=True); sb.pack(side="right",fill="y")
+        self.tree.bind("<ButtonRelease-1>", self.preview_selected)
         footer = tk.Frame(main,bg="#17191e"); footer.pack(fill="x",pady=(12,0))
         self.status = tk.StringVar(value="就绪。点击“自动查找”定位 MOD 目录。")
         tk.Label(footer,textvariable=self.status,bg="#17191e",fg="#9ca1ac",anchor="w").pack(side="left",fill="x",expand=True)
@@ -375,8 +378,7 @@ class Manager(tk.Tk):
         if not selected:
             messagebox.showinfo("提示", "请先在列表中选择一个文件或 MOD 文件夹。")
             return
-        values = self.tree.item(selected[0], "values")
-        old_path = values[3]
+        old_path = selected[0]
         if not old_path or not os.path.exists(old_path):
             messagebox.showwarning("项目不存在", "所选项目可能已被移动或删除，请刷新列表。")
             self.refresh_items()
@@ -410,7 +412,87 @@ class Manager(tk.Tk):
         q=self.filter_var.get().strip().casefold()
         for item in self.items:
             if q and not any(q in item[k].casefold() for k in ("name","type","path")): continue
-            self.tree.insert("","end",values=(item["name"],item["type"],item["size"],item["path"]))
+            self.tree.insert("","end",iid=item["path"],values=(item["name"],item["type"],item["size"]))
+
+
+    def preview_selected(self, _event=None):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        path = Path(selected[0])
+        if not path.exists():
+            return
+        if self.preview_window is None or not self.preview_window.winfo_exists():
+            win = tk.Toplevel(self)
+            win.title("MOD 预览")
+            win.geometry("620x520")
+            win.configure(bg="#20232a")
+            self.preview_window = win
+            self.preview_title = tk.Label(win, text="", bg="#20232a", fg="#ffffff",
+                                          font=("Segoe UI", 13, "bold"), anchor="w")
+            self.preview_title.pack(fill="x", padx=16, pady=(14, 6))
+            self.preview_info = tk.Label(win, text="", bg="#20232a", fg="#c7cad1",
+                                         justify="left", anchor="w", wraplength=580)
+            self.preview_info.pack(fill="x", padx=16, pady=(0, 10))
+            self.preview_body = tk.Text(win, bg="#17191e", fg="#e7e8eb",
+                                        insertbackground="#ffffff", wrap="word",
+                                        relief="flat", padx=10, pady=10)
+            self.preview_body.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+        else:
+            win = self.preview_window
+            win.deiconify()
+            win.lift()
+        self.preview_title.configure(text=path.name)
+        try:
+            if path.is_dir():
+                children = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.casefold()))
+                detail = f"类型：MOD 文件夹\\n项目数：{len(children)}"
+                body = "\\n".join(("📁 " if p.is_dir() else "📄 ") + p.name for p in children[:200])
+                if len(children) > 200:
+                    body += f"\\n…另有 {len(children) - 200} 项"
+                self.preview_body.configure(state="normal")
+                self.preview_body.delete("1.0", "end")
+                self.preview_body.insert("1.0", body or "此文件夹为空。")
+                self.preview_body.configure(state="disabled")
+                self.preview_info.configure(text=detail)
+                self.preview_body.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+                return
+            size = path.stat().st_size
+            detail = f"大小：{self.size_text(size)}\\n路径：{path}"
+            suffix = path.suffix.casefold()
+            self.preview_body.configure(state="normal")
+            self.preview_body.delete("1.0", "end")
+            self.preview_body.pack(fill="both", expand=True, padx=16, pady=(0, 16))
+            if suffix in {".txt", ".ini", ".cfg", ".json", ".xml", ".yaml", ".yml", ".toml", ".log", ".md"}:
+                try:
+                    content = path.read_text(encoding="utf-8-sig", errors="replace")
+                    self.preview_body.insert("1.0", content[:30000] or "文件为空。")
+                    if len(content) > 30000:
+                        self.preview_body.insert("end", "\\n\\n…预览已截断（文件内容超过 30000 字符）")
+                except OSError as e:
+                    self.preview_body.insert("1.0", f"无法读取文件：{e}")
+            elif suffix in {".png", ".gif"}:
+                try:
+                    photo = tk.PhotoImage(file=str(path))
+                    factor = max(1, (photo.width() + 500 - 1) // 500, (photo.height() + 340 - 1) // 340)
+                    if factor > 1:
+                        photo = photo.subsample(factor, factor)
+                    self.preview_image = photo
+                    self.preview_body.window_create("1.0", window=tk.Label(self.preview_body, image=photo, bg="#17191e"))
+                    self.preview_body.insert("end", f"\\n图片尺寸：{photo.width()} × {photo.height()}")
+                    detail += "\\n图片预览"
+                except tk.TclError:
+                    self.preview_body.insert("1.0", "当前环境无法直接预览此图片格式。")
+            else:
+                self.preview_body.insert("1.0", "此文件类型暂不支持内容预览。\\n可查看上方文件信息，或双击后使用系统关联程序打开。")
+            self.preview_body.configure(state="disabled")
+            self.preview_info.configure(text=detail)
+        except OSError as e:
+            self.preview_info.configure(text=f"无法读取所选项目：{e}")
+            self.preview_body.configure(state="normal")
+            self.preview_body.delete("1.0", "end")
+            self.preview_body.insert("1.0", str(e))
+            self.preview_body.configure(state="disabled")
 
     def open_dir(self):
         p=self.root_dir
