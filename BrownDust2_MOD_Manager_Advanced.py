@@ -12,21 +12,37 @@ SKIP = {"$recycle.bin", "system volume information", "windows",
         "windowsapps", "node_modules", ".git"}
 
 def matches_target(path):
+    """接受标准完整路径，也接受目录结构略有变化的 BrownDustX\mods。"""
     try:
-        parts = Path(os.path.abspath(path)).parts
-        return len(parts) >= len(TARGET) and tuple(
-            p.casefold() for p in parts[-len(TARGET):]
-        ) == tuple(p.casefold() for p in TARGET)
+        parts = [p.casefold() for p in Path(os.path.abspath(path)).parts]
+        target = [p.casefold() for p in TARGET]
+        if len(parts) >= len(target) and parts[-len(target):] == target:
+            return True
+        # 宽松匹配：mods 的父目录为 BrownDustX，且路径中仍能找到
+        # BepInEx 和 plugins；游戏更新/安装位置变化时也可识别。
+        return (
+            len(parts) >= 4
+            and parts[-1] == "mods"
+            and parts[-2] == "browndustx"
+            and "plugins" in parts[:-2]
+            and "bepinex" in parts[:-2]
+        )
     except (OSError, ValueError):
         return False
 
 def search_roots():
     roots = []
     home = Path.home()
-    for p in [home / "Games", home / "AppData/Local/Programs",
-              Path("C:/Program Files (x86)/Steam/steamapps"),
-              Path("C:/Program Files/Steam/steamapps"), Path("C:/Steam"),
-              Path("D:/SteamLibrary"), Path("D:/Steam"), Path("E:/SteamLibrary")]:
+    candidates = [
+        home / "Games", home / "AppData/Local/Programs",
+        home / "AppData/LocalLow", home / "AppData/Roaming",
+        Path("C:/Neowiz"), Path("C:/Games"), Path("C:/Game"),
+        Path("C:/Program Files (x86)/Steam/steamapps"),
+        Path("C:/Program Files/Steam/steamapps"), Path("C:/Steam"),
+        Path("D:/SteamLibrary"), Path("D:/Steam"), Path("D:/Games"),
+        Path("E:/SteamLibrary"), Path("E:/Games"),
+    ]
+    for p in candidates:
         try:
             if p.is_dir():
                 roots.append(str(p))
@@ -39,23 +55,33 @@ def search_roots():
                 roots.append(drive)
     else:
         roots.extend(["/mnt", "/media", str(home)])
+    # 盘符根目录已包含这些常见路径时，去重即可；重复扫描由 seen 防护。
     return list(dict.fromkeys(roots))
 
 def scan_mod_folders(status, found, stop):
     results, seen = [], set()
     roots = search_roots()
+    errors = [0]
     status(f"开始扫描 {len(roots)} 个搜索起点；大型磁盘可能需要几分钟…")
+
+    def walk_error(_error):
+        errors[0] += 1
+
     for root in roots:
         if stop.is_set():
             status("搜索已停止。")
             return
         status(f"正在扫描：{root}")
         try:
-            for current, dirs, _files in os.walk(root, topdown=True, onerror=lambda _e: None):
+            for current, dirs, _files in os.walk(root, topdown=True, onerror=walk_error):
                 if stop.is_set():
                     status("搜索已停止。")
                     return
-                dirs[:] = [d for d in dirs if d.casefold() not in SKIP]
+                # 不跳过 WindowsApps：某些游戏安装可能位于受保护的应用目录。
+                # 只跳过系统缓存、回收站及开发依赖目录。
+                dirs[:] = [d for d in dirs if d.casefold() not in {
+                    "$recycle.bin", "system volume information", "node_modules", ".git"
+                }]
                 if Path(current).name.casefold() == "mods" and matches_target(current):
                     normalized = os.path.normpath(os.path.abspath(current))
                     key = os.path.normcase(normalized)
@@ -64,9 +90,12 @@ def scan_mod_folders(status, found, stop):
                         results.append(normalized)
                         found(list(results))
         except (PermissionError, OSError):
+            errors[0] += 1
             continue
-    status(f"扫描完成：找到 {len(results)} 个目标目录。" if results
-           else "未找到目标目录。可以点击“选择目录”手动指定。")
+    if results:
+        status(f"扫描完成：找到 {len(results)} 个匹配目录。")
+    else:
+        status("未找到匹配目录。请用“选择目录”手动指定；若仍失败，请确认 mods 文件夹实际路径。")
 
 class Manager(tk.Tk):
     def __init__(self):
