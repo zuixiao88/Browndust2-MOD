@@ -169,8 +169,8 @@ class Manager(tk.Tk):
         top = tk.Frame(self, bg="#20232a", height=76)
         top.pack(fill="x"); top.pack_propagate(False)
         brand = tk.Frame(top, bg="#20232a"); brand.pack(side="left", padx=22, pady=12)
-        self.label(brand, "BROWNDUST2", 9, "#c59a55", True).pack(anchor="w")
-        self.label(brand, "MOD 管理器", 19, "#ffffff", True).pack(anchor="w")
+        self.label(brand, "棕色尘埃2", 9, "#c59a55", True).pack(anchor="w")
+        self.label(brand, "MOD管理器", 19, "#ffffff", True).pack(anchor="w")
         self.badge = self.label(top, "● 未扫描", 10, "#c59a55", True)
         self.badge.pack(side="right", padx=24)
 
