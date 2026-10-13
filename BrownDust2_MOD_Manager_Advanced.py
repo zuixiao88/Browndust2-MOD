@@ -446,10 +446,10 @@ class Manager(tk.Tk):
         try:
             if path.is_dir():
                 children = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.casefold()))
-                detail = f"类型：MOD 文件夹\\n项目数：{len(children)}"
-                body = "\\n".join(("📁 " if p.is_dir() else "📄 ") + p.name for p in children[:200])
+                detail = f"类型：MOD 文件夹\n项目数：{len(children)}"
+                body = "\n".join(("📁 " if p.is_dir() else "📄 ") + p.name for p in children[:200])
                 if len(children) > 200:
-                    body += f"\\n…另有 {len(children) - 200} 项"
+                    body += f"\n…另有 {len(children) - 200} 项"
                 self.preview_body.configure(state="normal")
                 self.preview_body.delete("1.0", "end")
                 self.preview_body.insert("1.0", body or "此文件夹为空。")
@@ -458,7 +458,7 @@ class Manager(tk.Tk):
                 self.preview_body.pack(fill="both", expand=True, padx=16, pady=(0, 16))
                 return
             size = path.stat().st_size
-            detail = f"大小：{self.size_text(size)}\\n路径：{path}"
+            detail = f"大小：{self.size_text(size)}\n路径：{path}"
             suffix = path.suffix.casefold()
             self.preview_body.configure(state="normal")
             self.preview_body.delete("1.0", "end")
@@ -468,7 +468,7 @@ class Manager(tk.Tk):
                     content = path.read_text(encoding="utf-8-sig", errors="replace")
                     self.preview_body.insert("1.0", content[:30000] or "文件为空。")
                     if len(content) > 30000:
-                        self.preview_body.insert("end", "\\n\\n…预览已截断（文件内容超过 30000 字符）")
+                        self.preview_body.insert("end", "\n\n…预览已截断（文件内容超过 30000 字符）")
                 except OSError as e:
                     self.preview_body.insert("1.0", f"无法读取文件：{e}")
             elif suffix in {".png", ".gif"}:
@@ -479,12 +479,12 @@ class Manager(tk.Tk):
                         photo = photo.subsample(factor, factor)
                     self.preview_image = photo
                     self.preview_body.window_create("1.0", window=tk.Label(self.preview_body, image=photo, bg="#17191e"))
-                    self.preview_body.insert("end", f"\\n图片尺寸：{photo.width()} × {photo.height()}")
-                    detail += "\\n图片预览"
+                    self.preview_body.insert("end", f"\n图片尺寸：{photo.width()} × {photo.height()}")
+                    detail += "\n图片预览"
                 except tk.TclError:
                     self.preview_body.insert("1.0", "当前环境无法直接预览此图片格式。")
             else:
-                self.preview_body.insert("1.0", "此文件类型暂不支持内容预览。\\n可查看上方文件信息，或双击后使用系统关联程序打开。")
+                self.preview_body.insert("1.0", "此文件类型暂不支持内容预览。\n可查看上方文件信息，或双击后使用系统关联程序打开。")
             self.preview_body.configure(state="disabled")
             self.preview_info.configure(text=detail)
         except OSError as e:
