@@ -169,6 +169,8 @@ class Manager(tk.Tk):
         listing.pack(fill="both", expand=True)
         lh = tk.Frame(listing, bg="#20232a"); lh.pack(fill="x", pady=(0,10))
         self.label(lh, "MOD 文件列表", 12, "#ffffff", True).pack(side="left")
+        self.button(lh, "启用 / 禁用所选项", self.toggle_selected).pack(side="right", padx=(8,0))
+        self.button(lh, "刷新列表", self.refresh_items).pack(side="right")
         self.filter_var = tk.StringVar()
         ent = tk.Entry(lh, textvariable=self.filter_var, width=28, bg="#17191e",
             fg="#e7e8eb", insertbackground="#ffffff", relief="flat", bd=0)
@@ -194,7 +196,7 @@ class Manager(tk.Tk):
                         fg="#ffffff" if k==key else "#c7cad1")
         if key == "paths": self.start_search()
         elif key == "settings":
-            messagebox.showinfo("设置","当前版本无需额外依赖。MOD 启用/禁用与备份功能将在后续版本加入。")
+            messagebox.showinfo("设置","MOD 启用/禁用通过在所选项目名称末尾添加或移除 .disabled 实现。识别类别基于扩展名和目录类型；请先备份重要 MOD。")
         elif key == "overview": self.status.set("总览：选择目录后会显示文件统计。")
         else: self.status.set("MOD 列表：显示所选目录中的文件和子目录。")
 
@@ -227,17 +229,41 @@ class Manager(tk.Tk):
             value /= 1024
         return str(n)
 
+    @staticmethod
+    def classify_mod(path, is_dir):
+        name = Path(path).name
+        disabled = name.casefold().endswith(".disabled")
+        clean = name[:-9] if disabled else name
+        suffix = Path(clean).suffix.casefold()
+        if is_dir:
+            category = "MOD 文件夹"
+        elif suffix == ".dll":
+            category = "BepInEx 插件"
+        elif suffix in {".zip", ".7z", ".rar"}:
+            category = "压缩包"
+        elif suffix in {".pak", ".bundle", ".assetbundle", ".assets"}:
+            category = "游戏资源"
+        elif suffix in {".json", ".ini", ".cfg", ".toml", ".xml"}:
+            category = "配置文件"
+        elif suffix in {".png", ".jpg", ".jpeg", ".webp", ".dds", ".tex"}:
+            category = "图像/纹理"
+        else:
+            category = suffix.lstrip(".").upper() + " 文件" if suffix else "文件"
+        return category + ("（已禁用）" if disabled else "（已启用）")
+
     def load_items(self):
         self.items=[]; files=folders=0
         try:
             for p in Path(self.root_dir).iterdir():
                 try:
-                    if p.is_dir():
+                    is_dir = p.is_dir()
+                    if is_dir:
                         folders += 1
-                        self.items.append({"name":p.name,"type":"文件夹","size":"—","path":str(p)})
+                        self.items.append({"name":p.name,"type":self.classify_mod(p, True),
+                                           "size":"—","path":str(p)})
                     elif p.is_file():
                         files += 1
-                        self.items.append({"name":p.name,"type":p.suffix.lower() or "文件",
+                        self.items.append({"name":p.name,"type":self.classify_mod(p, False),
                                            "size":self.size_text(p.stat().st_size),"path":str(p)})
                 except OSError: continue
         except (PermissionError,OSError) as e:
@@ -246,6 +272,45 @@ class Manager(tk.Tk):
         self.metric["folders"].set(str(folders)); self.metric["state"].set("已完成")
         self.render_items()
         self.status.set(f"已读取目录：{files} 个文件，{folders} 个子目录。")
+
+    def refresh_items(self):
+        if self.root_dir and os.path.isdir(self.root_dir):
+            self.load_items()
+
+    def toggle_selected(self):
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showinfo("提示", "请先在列表中选择一个文件或 MOD 文件夹。")
+            return
+        values = self.tree.item(selected[0], "values")
+        old_path = values[3]
+        if not old_path or not os.path.exists(old_path):
+            messagebox.showwarning("项目不存在", "所选项目可能已被移动或删除，请刷新列表。")
+            self.refresh_items()
+            return
+        path = Path(old_path)
+        is_disabled = path.name.casefold().endswith(".disabled")
+        if is_disabled:
+            new_path = path.with_name(path.name[:-9])
+            action = "启用"
+        else:
+            new_path = path.with_name(path.name + ".disabled")
+            action = "禁用"
+        if new_path.exists():
+            messagebox.showerror("无法操作", f"目标名称已存在，未作更改：\n{new_path}")
+            return
+        ok = messagebox.askyesno(
+            f"确认{action}",
+            f"将通过重命名{action}所选项目。此操作会改变文件/文件夹名称，"
+            f"可能影响依赖原名称的 MOD。\n\n{path.name}\n→ {new_path.name}\n\n继续吗？")
+        if not ok:
+            return
+        try:
+            path.rename(new_path)
+            self.load_items()
+            self.status.set(f"已{action}：{new_path.name}")
+        except OSError as e:
+            messagebox.showerror(f"{action}失败", f"无法重命名项目：\n{e}")
 
     def render_items(self):
         self.tree.delete(*self.tree.get_children())
