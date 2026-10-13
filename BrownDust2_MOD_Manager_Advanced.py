@@ -59,43 +59,71 @@ def search_roots():
     return list(dict.fromkeys(roots))
 
 def scan_mod_folders(status, found, stop):
-    results, seen = [], set()
+    """先定位 Neowiz，再仅在其目录树中寻找 mod/mods。"""
     roots = search_roots()
-    errors = [0]
-    status(f"开始扫描 {len(roots)} 个搜索起点；大型磁盘可能需要几分钟…")
+    neowiz_dirs, results = [], []
+    seen_neowiz, seen_mods = set(), set()
 
     def walk_error(_error):
-        errors[0] += 1
+        pass
 
+    status(f"第一阶段：优先查找 Neowiz 文件夹（{len(roots)} 个搜索起点）…")
     for root in roots:
         if stop.is_set():
             status("搜索已停止。")
             return
-        status(f"正在扫描：{root}")
+        status(f"正在查找 Neowiz：{root}")
         try:
             for current, dirs, _files in os.walk(root, topdown=True, onerror=walk_error):
                 if stop.is_set():
                     status("搜索已停止。")
                     return
-                # 不跳过 WindowsApps：某些游戏安装可能位于受保护的应用目录。
-                # 只跳过系统缓存、回收站及开发依赖目录。
                 dirs[:] = [d for d in dirs if d.casefold() not in {
                     "$recycle.bin", "system volume information", "node_modules", ".git"
                 }]
-                if Path(current).name.casefold() == "mods" and matches_target(current):
+                if Path(current).name.casefold() == "neowiz":
                     normalized = os.path.normpath(os.path.abspath(current))
                     key = os.path.normcase(normalized)
-                    if key not in seen:
-                        seen.add(key)
+                    if key not in seen_neowiz:
+                        seen_neowiz.add(key)
+                        neowiz_dirs.append(normalized)
+                    # Neowiz 子目录留待第二阶段扫描，避免在第一阶段重复深入。
+                    dirs[:] = []
+        except (PermissionError, OSError):
+            continue
+
+    if not neowiz_dirs:
+        status("没有找到 Neowiz 文件夹。请点击“选择目录”手动指定 MOD 文件夹。")
+        return
+
+    status(f"第二阶段：找到 {len(neowiz_dirs)} 个 Neowiz 文件夹，正在查找 mod/mods…")
+    for base in neowiz_dirs:
+        if stop.is_set():
+            status("搜索已停止。")
+            return
+        status(f"正在 Neowiz 中查找 MOD：{base}")
+        try:
+            for current, dirs, _files in os.walk(base, topdown=True, onerror=walk_error):
+                if stop.is_set():
+                    status("搜索已停止。")
+                    return
+                dirs[:] = [d for d in dirs if d.casefold() not in {
+                    "$recycle.bin", "system volume information", "node_modules", ".git"
+                }]
+                if Path(current).name.casefold() in {"mod", "mods"}:
+                    normalized = os.path.normpath(os.path.abspath(current))
+                    key = os.path.normcase(normalized)
+                    if key not in seen_mods:
+                        seen_mods.add(key)
                         results.append(normalized)
                         found(list(results))
         except (PermissionError, OSError):
-            errors[0] += 1
             continue
+
     if results:
-        status(f"扫描完成：找到 {len(results)} 个匹配目录。")
+        status(f"扫描完成：在 Neowiz 文件夹内找到 {len(results)} 个 mod/mods 目录。")
     else:
-        status("未找到匹配目录。请用“选择目录”手动指定；若仍失败，请确认 mods 文件夹实际路径。")
+        status("已找到 Neowiz 文件夹，但其中没有 mod/mods 目录。请点击“选择目录”手动指定。")
 
 class Manager(tk.Tk):
     def __init__(self):
@@ -400,7 +428,7 @@ class Manager(tk.Tk):
                 kind, value=self.events.get_nowait()
                 if kind=="status":
                     self.status.set(value)
-                    if value.startswith(("扫描完成","未找到","搜索已停止")):
+                    if value.startswith(("扫描完成","未找到","没有找到 Neowiz","已找到 Neowiz","搜索已停止")):
                         self.progress.stop()
                         self.metric["state"].set("已完成" if value.startswith("扫描完成") else "未找到")
                         self.badge.configure(text="● 已定位" if value.startswith("扫描完成") else "● 未找到",
